@@ -10,6 +10,19 @@ export class ControlDApiError extends Error {
   }
 }
 
+export const statisticGroups = [
+  "endpointId",
+  "profileId",
+  "action",
+  "trigger",
+  "triggerValue",
+  "question",
+  "protocol",
+  "statusCode",
+  "rrType",
+] as const;
+export type StatisticGroup = (typeof statisticGroups)[number];
+
 export class ControlDClient {
   constructor(private readonly config: ControlDConfig) {}
 
@@ -25,6 +38,31 @@ export class ControlDClient {
   }
 
   async analytics(params: URLSearchParams): Promise<unknown> {
+    const baseUrl = await this.analyticsBase();
+    return this.requestUrl(
+      "GET",
+      `${baseUrl}/v2/activity-log?${params.toString()}`,
+    );
+  }
+
+  // Aggregate counts only (no raw log rows). The path is built from a fixed
+  // prefix plus a group name checked against an allow-list, never from caller text.
+  async statisticCount(
+    group: StatisticGroup | undefined,
+    params: URLSearchParams,
+  ): Promise<unknown> {
+    if (group !== undefined && !statisticGroups.includes(group)) {
+      throw new ControlDApiError("Invalid statistics group.");
+    }
+    const baseUrl = await this.analyticsBase();
+    const suffix = group === undefined ? "" : `/${group}`;
+    return this.requestUrl(
+      "GET",
+      `${baseUrl}/v2/statistic/count${suffix}?${params.toString()}`,
+    );
+  }
+
+  private async analyticsBase(): Promise<string> {
     const user = asRecord(unwrapBody(await this.request("GET", "/users")));
     const organization = asOptionalRecord(user.org);
     const endpoint =
@@ -35,11 +73,7 @@ export class ControlDClient {
         "This Control D account did not provide an analytics endpoint. Full Analytics may be disabled.",
       );
     }
-    const baseUrl = analyticsBaseUrl(endpoint);
-    return this.requestUrl(
-      "GET",
-      `${baseUrl}/v2/activity-log?${params.toString()}`,
-    );
+    return analyticsBaseUrl(endpoint);
   }
 
   // Asks an endpoint's own DNS-over-HTTPS resolver how it would answer a name.
